@@ -1,0 +1,16 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "G:\\quant_road"
+		}
+	],
+	"settings": {
+		// 解决编辑器代码分析（下划线提示）的路径问题
+    "python.analysis.extraPaths": [
+      "G:\\quant_road"  // 项目根目录，让VS Code能找到common_utils
+    ]
+	}
+}
