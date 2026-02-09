@@ -1,6 +1,11 @@
+import pandas as pd
+import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
+from backtest_utils import *
+from common_utils import *
 
+# 1. 描述性统计、覆盖度分析
 def plot_factor_stats(df_factor):
     """
     图1：因子统计特征
@@ -53,4 +58,92 @@ def plot_factor_coverage(df_factor, df_daily):
     plt.tight_layout()
     plt.show()
 
-d
+def get_future_returns(df_close_wide, p=1):
+    """计算未来收益率 (矩阵化)"""
+    return (df_close_wide.shift(-p) / df_close_wide) - 1
+ 
+def preprocess_factor(wide_factor):
+    """因子预处理：去极值 (Winsorize) 和 标准化 (Z-Score)"""
+    # 截面去极值 (3倍中位数绝对偏差法)
+    def winsorize_series(s):
+        median = s.median()
+        mad = (s - median).abs().median()
+        threshold = 3 * 1.4826 * mad
+        return s.clip(lower=median - threshold, upper=median + threshold)
+    
+    # 截面处理
+    wide_factor = wide_factor.apply(winsorize_series, axis=1)
+    # 截面标准化
+    wide_factor = wide_factor.apply(lambda s: (s - s.mean()) / s.std(), axis=1)
+    return wide_factor
+ 
+def calc_ic_stats(wide_factor, wide_ret):
+    """计算 IC 和 Rank IC"""
+    ic = wide_factor.corrwith(wide_ret, axis=1, method='pearson')
+    rank_ic = wide_factor.corrwith(wide_ret, axis=1, method='spearman')
+    return pd.DataFrame({'IC': ic, 'Rank_IC': rank_ic})
+ 
+def calc_quantile_stats(wide_factor, wide_ret, bins=5):
+    """分层收益计算"""
+    wide_ranks = wide_factor.rank(axis=1, pct=True)
+    wide_quantiles = (wide_ranks * bins).apply(np.ceil)
+    
+    res = {}
+    for b in range(1, bins + 1):
+        res[f'Group_{b}'] = wide_ret[wide_quantiles == b].mean(axis=1)
+    return pd.DataFrame(res)
+
+def run_factor_test(df_factor, start_date, end_date, factor_col='str_factor', periods=[1], bins=5):
+    """
+    一键运行全流程：长表输入 -> 宽表计算 -> 结果输出
+    """
+    # --- 1. 数据准备 (长转宽) ---
+    log("======= 数据准备 =======")
+    start_year = pd.to_datetime(start_date).year
+    end_year = pd.to_datetime(end_date).year
+    df_daily = load_parquet_by_years('daily', 'daily', start_year, end_year)
+    df_daily = df_daily.loc[pd.IndexSlice[:, start_date:end_date], :]
+
+    wide_factor = df_factor[factor_col].unstack(level='order_book_id')
+    wide_close = df_daily['close'].unstack(level='order_book_id')
+    
+    # 对齐索引
+    common_dates = wide_factor.index.intersection(wide_close.index)
+    wide_factor = wide_factor.loc[common_dates]
+    wide_close = wide_close.loc[common_dates]
+
+    # --- 2. 预处理 ---
+    # 先处理因子值
+    log("======= 因子预处理 =======")
+    processed_factor = preprocess_factor(wide_factor)
+
+    # --- 3. 计算收益率 ---
+    # 默认分析 next_1_ret
+    log("======= 收益率计算 =======")
+    wide_ret = get_future_returns(wide_close, p=periods[0])
+
+    # --- 4. 评价 ---
+    log("======= IC分析 =======")
+    ic_df = calc_ic_stats(processed_factor, wide_ret)
+
+    log("======= 分层汇总 =======")
+    quantile_df = calc_quantile_stats(processed_factor, wide_ret, bins=bins)
+    
+    # --- 5. 汇总结果 ---
+    results = {
+        'ic_df': ic_df,
+        'quantile_df': quantile_df,
+        'summary': {
+            'IC_Mean': ic_df['IC'].mean(),
+            'Rank_IC_Mean': ic_df['Rank_IC'].mean(),
+            'IC_IR': ic_df['IC'].mean() / ic_df['IC'].std() if ic_df['IC'].std() != 0 else 0,
+            'Long_Short_Ret': (quantile_df[f'Group_{bins}'] - quantile_df['Group_1']).mean()
+        }
+    }
+    
+    return results
+
+if __name__ == '__main__':
+    df_factor = pd.read_parquet(r'G:\quant_road\str.parquet')
+    run_factor_test(df_factor, '2016-01-01', '2025-12-31')
+    print(1)
