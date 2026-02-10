@@ -14,6 +14,7 @@ from factor_engine import (
     plot_factor_stats,
     plot_factor_coverage,
     plot_ic_cumulative,
+    plot_ic_yearly,
     plot_quantile_returns,
     plot_long_short,
     _calc_drawdown,
@@ -86,8 +87,8 @@ def run_factor_test(df_factor, start_date, end_date, factor_col='str_factor', bi
     """
     # --- 1. 数据准备 (长转宽) ---
     log("======= 数据准备(含交易约束) =======")
-    df_daily = get_K_data(start_date, end_date)
-
+    # df_daily = get_K_data(start_date, end_date)
+    df_daily = pd.read_parquet("G:\quant_road\K_clean_data.parquet")
     wide_factor = df_factor[factor_col].unstack(level='order_book_id')
     wide_close = df_daily['close'].unstack(level='order_book_id')
     wide_can_buy = df_daily['can_buy'].unstack(level='order_book_id')
@@ -124,6 +125,8 @@ def run_factor_test(df_factor, start_date, end_date, factor_col='str_factor', bi
     # --- 5. 可视化 ---
     log("======= 绘制IC累积图 =======")
     plot_ic_cumulative(ic_df)
+    log("======= 绘制分年度IC =======")
+    plot_ic_yearly(ic_df)
     log("======= 绘制分层收益图 =======")
     plot_quantile_returns(quantile_df, bins=bins)
     log("======= 绘制多头/多空净值与回撤 =======")
@@ -153,4 +156,3 @@ def run_factor_test(df_factor, start_date, end_date, factor_col='str_factor', bi
 if __name__ == '__main__':
     df_factor = pd.read_parquet(r'G:\quant_road\str.parquet')
     run_factor_test(df_factor, '2016-01-01', '2025-12-31', bins=10)
-    print(1)

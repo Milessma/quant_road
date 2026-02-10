@@ -116,6 +116,66 @@ def plot_ic_cumulative(ic_df):
     plt.tight_layout()
     plt.show()
 
+def plot_ic_yearly(ic_df):
+    """
+    图3b：分年度 IC / Rank IC 统计柱状图
+    每年一组柱子, 展示该年 IC均值、Rank IC均值、IC_IR
+    """
+    ic_df = ic_df.copy()
+    ic_df['year'] = ic_df.index.year
+
+    yearly = ic_df.groupby('year').agg(
+        IC_Mean=('IC', 'mean'),
+        IC_Std=('IC', 'std'),
+        RankIC_Mean=('Rank_IC', 'mean'),
+        RankIC_Std=('Rank_IC', 'std'),
+    )
+    yearly['IC_IR'] = yearly['IC_Mean'] / yearly['IC_Std']
+    yearly['RankIC_IR'] = yearly['RankIC_Mean'] / yearly['RankIC_Std']
+
+    fig, axes = plt.subplots(2, 1, figsize=(14, 10))
+    x = np.arange(len(yearly))
+    width = 0.35
+
+    # --- 上图: IC Mean & Rank IC Mean ---
+    bars1 = axes[0].bar(x - width/2, yearly['IC_Mean'], width, label='IC Mean', color='#3498db', edgecolor='grey')
+    bars2 = axes[0].bar(x + width/2, yearly['RankIC_Mean'], width, label='Rank IC Mean', color='#e74c3c', edgecolor='grey')
+    for bar in bars1:
+        h = bar.get_height()
+        axes[0].text(bar.get_x() + bar.get_width()/2, h, f'{h:.4f}',
+                     ha='center', va='bottom' if h >= 0 else 'top', fontsize=8)
+    for bar in bars2:
+        h = bar.get_height()
+        axes[0].text(bar.get_x() + bar.get_width()/2, h, f'{h:.4f}',
+                     ha='center', va='bottom' if h >= 0 else 'top', fontsize=8)
+    axes[0].set_xticks(x)
+    axes[0].set_xticklabels(yearly.index)
+    axes[0].set_title('Yearly IC Mean & Rank IC Mean')
+    axes[0].axhline(y=0, color='black', linewidth=0.5)
+    axes[0].legend(loc='upper left')
+    axes[0].grid(True, linestyle='--', alpha=0.3, axis='y')
+
+    # --- 下图: IC_IR & RankIC_IR ---
+    bars3 = axes[1].bar(x - width/2, yearly['IC_IR'], width, label='IC IR', color='#2ecc71', edgecolor='grey')
+    bars4 = axes[1].bar(x + width/2, yearly['RankIC_IR'], width, label='Rank IC IR', color='#f39c12', edgecolor='grey')
+    for bar in bars3:
+        h = bar.get_height()
+        axes[1].text(bar.get_x() + bar.get_width()/2, h, f'{h:.2f}',
+                     ha='center', va='bottom' if h >= 0 else 'top', fontsize=8)
+    for bar in bars4:
+        h = bar.get_height()
+        axes[1].text(bar.get_x() + bar.get_width()/2, h, f'{h:.2f}',
+                     ha='center', va='bottom' if h >= 0 else 'top', fontsize=8)
+    axes[1].set_xticks(x)
+    axes[1].set_xticklabels(yearly.index)
+    axes[1].set_title('Yearly IC IR & Rank IC IR')
+    axes[1].axhline(y=0, color='black', linewidth=0.5)
+    axes[1].legend(loc='upper left')
+    axes[1].grid(True, linestyle='--', alpha=0.3, axis='y')
+
+    plt.tight_layout()
+    plt.show()
+
 def plot_quantile_returns(quantile_df, bins=5):
     """
     图4：分层收益图
@@ -123,7 +183,7 @@ def plot_quantile_returns(quantile_df, bins=5):
     子图2: 各组累积净值曲线
     """
     fig, axes = plt.subplots(2, 1, figsize=(14, 10))
-
+    
     # 配色：从深绿到深红，避免明黄色
     colors = plt.cm.RdYlGn_r(np.linspace(0.1, 0.9, bins))
 
@@ -337,6 +397,8 @@ def run_factor_test(df_factor, start_date, end_date, factor_col='str_factor', bi
     # --- 5. 可视化 ---
     log("======= 绘制IC累积图 =======")
     plot_ic_cumulative(ic_df)
+    log("======= 绘制分年度IC =======")
+    plot_ic_yearly(ic_df)
     log("======= 绘制分层收益图 =======")
     plot_quantile_returns(quantile_df, bins=bins)
     log("======= 绘制多头/多空净值与回撤 =======")

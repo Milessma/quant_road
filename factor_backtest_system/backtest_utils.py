@@ -81,4 +81,5 @@ def get_K_data(start_date, end_date):
     return df_clean
 
 if __name__ == '__main__':
-    df = get_K_data('2015-01-01', '2015-12-31')
+    df = get_K_data('2016-01-01', '2025-12-31')
+    df.to_parquet("K_clean_data.parquet")
