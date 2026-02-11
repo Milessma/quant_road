@@ -82,7 +82,6 @@ def calc_quantile_stats_fast(wide_factor, wide_ret_daily, wide_can_buy, wide_can
             mask = actual & np.isfinite(r) # 有持仓且有收益
             cnt = mask.sum()
             group_rets[t, b] = r[mask].sum() / cnt if cnt > 0 else 0.0
-            
             prev_hold[b] = actual
     
     cols = [f'Group_{b}' for b in range(1, bins + 1)]
@@ -165,6 +164,6 @@ def run_factor_test(df_factor, start_date, end_date, factor_col='str_factor', bi
 
 
 if __name__ == '__main__':
-    period = 5
+    period = 60
     df_factor = pd.read_parquet(r'G:\quant_road\str.parquet')
     run_factor_test(df_factor, '2016-01-01', '2025-12-31', bins=10, N=period)
