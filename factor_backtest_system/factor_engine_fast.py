@@ -24,26 +24,28 @@ from factor_engine import (
 )
 
 
-def calc_quantile_stats_fast(wide_factor, wide_ret, wide_can_buy, wide_can_sell, bins=5):
+def calc_quantile_stats_fast(wide_factor, wide_ret_daily, wide_can_buy, wide_can_sell, bins=5, hold_days=1):
     """
     分层收益计算 (向量化加速版)
     
     逻辑与 factor_engine.calc_quantile_stats 完全一致:
-    - T日因子分组 → T+1日买入 → T+2日卖出
-    - wide_can_buy: 已 shift(-1) 对齐到T日行
-    - wide_can_sell: 已 shift(-1) 对齐到T日行
+    - T-1日因子分组 → T日买入 → T+hold_days日卖出
+    - wide_can_buy: T日是否能买
+    - wide_can_sell: T日是否能卖
     - 卖不出的股票被迫继续持有, 其收益仍计入组合
+    - wide_ret_daily: 日频收益 (N=1), 用于逐日计算组合收益
+    - hold_days: 调仓周期, 每 hold_days 天重新分组一次
     
     加速方式: 全部转 numpy, 逐日只做矩阵运算, 消除内层 Python 循环
     """
     # 1. 只对可买入的股票进行分组
     buyable_factor = wide_factor.where(wide_can_buy)
-    wide_ranks = buyable_factor.rank(axis=1, pct=True)
-    wide_quantiles = (wide_ranks * bins).apply(np.ceil)
-
+    wide_ranks = buyable_factor.rank(axis=1, pct=True) # .rank(axis=1, pct=True): 在行上计算百分比排名, 输出为(0, 1]
+    wide_quantiles = (wide_ranks * bins).apply(np.ceil) # * bins: 线性缩放, 将排名映射到(0, bins] 区间, .apply(np.ceil): 向上取整, 将连续数值转换为{1, 2, ..., bins}的整数标签
+    
     # 2. 转 numpy (T x N)
     q_arr = wide_quantiles.values                    # float, NaN = 无分组
-    ret_arr = wide_ret.values                        # float
+    ret_arr = wide_ret_daily.values                  # float, 日频收益
     can_sell_arr = wide_can_sell.fillna(True).values.astype(bool)  # NaN 视为可卖
     
     T, N = q_arr.shape
@@ -63,12 +65,19 @@ def calc_quantile_stats_fast(wide_factor, wide_ret, wide_can_buy, wide_can_sell,
     for t in tqdm.tqdm(range(T), desc='分层持仓模拟(fast)'):
         sell_ok = can_sell_arr[t]          # (N,) 今天能否卖出
         
+        # 判断是否为调仓日: 从 t=1 开始, 每 hold_days 天调一次仓
+        is_rebalance = (t >= 1) and ((t - 1) % hold_days == 0)
+        
         for b in range(bins):
-            target = target_masks[b, t]    # (N,) 当期目标持仓
+            if is_rebalance:
+                target = target_masks[b, t]    # (N,) 调仓日: 用新因子分组
+            else:
+                target = prev_hold[b]          # (N,) 非调仓日: 沿用上期持仓
+            
             forced = prev_hold[b] & ~sell_ok  # (N,) 上期卖不出的
             actual = target | forced       # (N,) 实际持仓
             
-            # 计算等权收益
+            # 计算等权收益 (日频)
             r = ret_arr[t]                 # (N,)
             mask = actual & np.isfinite(r) # 有持仓且有收益
             cnt = mask.sum()
@@ -80,10 +89,10 @@ def calc_quantile_stats_fast(wide_factor, wide_ret, wide_can_buy, wide_can_sell,
     return pd.DataFrame(group_rets, index=wide_factor.index, columns=cols)
 
 
-def run_factor_test(df_factor, start_date, end_date, factor_col='str_factor', bins=5):
+def run_factor_test(df_factor, start_date, end_date, factor_col='str_factor', bins=5, N=1):
     """
     一键运行全流程 (加速版)
-    时序: T日因子 → T+1日买入 → T+2日卖出
+    时序: T-1日因子 → T日买入 → T+N日卖出
     """
     # --- 1. 数据准备 (长转宽) ---
     log("======= 数据准备(含交易约束) =======")
@@ -101,9 +110,10 @@ def run_factor_test(df_factor, start_date, end_date, factor_col='str_factor', bi
     wide_can_buy = wide_can_buy.loc[common_dates]
     wide_can_sell = wide_can_sell.loc[common_dates]
 
-    # shift 对齐到 T 日视角
-    wide_can_buy_aligned = wide_can_buy.shift(-1)
-    wide_can_sell_aligned = wide_can_sell.shift(-1)
+    # 新视角: T日为交易日, 因子来自T-1日
+    # 因子 shift(1): T-1日因子对齐到T日行
+    # can_buy / can_sell: 直接用T日的, 不需要shift
+    wide_factor = wide_factor.shift(1)
 
     # --- 2. 预处理 ---
     log("======= 因子预处理 =======")
@@ -111,7 +121,8 @@ def run_factor_test(df_factor, start_date, end_date, factor_col='str_factor', bi
 
     # --- 3. 计算收益率 ---
     log("======= 收益率计算 =======")
-    wide_ret = get_future_returns(wide_close)
+    wide_ret = get_future_returns(wide_close, N=N)        # N天总收益, 用于IC
+    wide_ret_daily = get_future_returns(wide_close, N=1)  # 日频收益, 用于分层模拟
 
     # --- 4. 评价 ---
     log("======= IC分析 =======")
@@ -119,7 +130,7 @@ def run_factor_test(df_factor, start_date, end_date, factor_col='str_factor', bi
 
     log("======= 分层汇总(含交易约束, 加速版) =======")
     quantile_df = calc_quantile_stats_fast(
-        processed_factor, wide_ret, wide_can_buy_aligned, wide_can_sell_aligned, bins=bins
+        processed_factor, wide_ret_daily, wide_can_buy, wide_can_sell, bins=bins, hold_days=N
     )
     
     # --- 5. 可视化 ---
@@ -154,5 +165,6 @@ def run_factor_test(df_factor, start_date, end_date, factor_col='str_factor', bi
 
 
 if __name__ == '__main__':
+    period = 5
     df_factor = pd.read_parquet(r'G:\quant_road\str.parquet')
-    run_factor_test(df_factor, '2016-01-01', '2025-12-31', bins=10)
+    run_factor_test(df_factor, '2016-01-01', '2025-12-31', bins=10, N=period)

@@ -275,13 +275,13 @@ def plot_long_short(quantile_df, bins=5):
     plt.tight_layout()
     plt.show()
 
-def get_future_returns(df_close_wide):
+def get_future_returns(df_close_wide, N):
     """
     计算未来收益率 (矩阵化)
-    T日行对应的收益 = close(T+2) / close(T+1) - 1
-    即: T日看因子, T+1日买入, T+2日卖出
+    T日行对应的收益 = close(T+N) / close(T) - 1
+    即: T日买入，T+N日卖出
     """
-    return df_close_wide.shift(-2) / df_close_wide.shift(-1) - 1
+    return df_close_wide.shift(-N) / df_close_wide - 1
  
 def preprocess_factor(wide_factor, n=3):
     """因子预处理：去极值 (Winsorize) 和 标准化 (Z-Score)"""
@@ -304,14 +304,14 @@ def calc_ic_stats(wide_factor, wide_ret):
     rank_ic = wide_factor.corrwith(wide_ret, axis=1, method='spearman')
     return pd.DataFrame({'IC': ic, 'Rank_IC': rank_ic})
  
-def calc_quantile_stats(wide_factor, wide_ret, wide_can_buy, wide_can_sell, bins=5):
+def calc_quantile_stats(wide_factor, wide_ret, wide_can_buy, wide_can_sell, bins=5, N=1):
     """
     分层收益计算 (精细版: 考虑交易约束)
     
     逻辑:
-    - T日因子分组 → T+1日买入 → T+2日卖出
-    - wide_can_buy: T+1日能否买入 (已 shift(-1) 对齐到T日行)
-    - wide_can_sell: T+1日能否卖出上期持仓 (已 shift(-1) 对齐到T日行)
+    - T-1日因子分组 → T日买入 → T+N日卖出
+    - wide_can_buy: T日能否买入
+    - wide_can_sell: T日能否卖出
     - 卖不出的股票被迫继续持有, 其收益仍计入组合
     """
     # 1. 只对可买入的股票进行分组
@@ -324,9 +324,16 @@ def calc_quantile_stats(wide_factor, wide_ret, wide_can_buy, wide_can_sell, bins
     res = {f'Group_{b}': [] for b in range(1, bins + 1)}
     
     for i, date in tqdm.tqdm(enumerate(dates), total=len(dates), desc='分层持仓模拟'):
+        # 判断是否为调仓日: 从 i=1 开始, 每 N 天调一次仓
+        is_rebalance = (i >= 1) and ((i - 1) % N == 0)
+        
         for b in range(1, bins + 1):
-            # 当期目标持仓: 因子分组中属于 group b 的股票
-            target_stocks = set(wide_quantiles.columns[wide_quantiles.loc[date] == b])
+            if is_rebalance:
+                # 调仓日: 用新因子分组
+                target_stocks = set(wide_quantiles.columns[wide_quantiles.loc[date] == b])
+            else:
+                # 非调仓日: 沿用上期持仓
+                target_stocks = prev_holdings[b]
             
             # 上期持仓中, 今天卖不出的股票 (can_sell 为 False)
             forced_hold = set()
@@ -350,10 +357,10 @@ def calc_quantile_stats(wide_factor, wide_ret, wide_can_buy, wide_can_sell, bins
     
     return pd.DataFrame(res, index=dates)
 
-def run_factor_test(df_factor, start_date, end_date, factor_col='str_factor', bins=5):
+def run_factor_test(df_factor, start_date, end_date, factor_col='str_factor', bins=5, N=1):
     """
     一键运行全流程：长表输入 -> 宽表计算 -> 结果输出
-    时序: T日因子 → T+1日买入 → T+2日卖出
+    时序: T-1日因子 → T日买入 → T+N日卖出
     """
     # --- 1. 数据准备 (长转宽) ---
     log("======= 数据准备(含交易约束) =======")
@@ -371,11 +378,10 @@ def run_factor_test(df_factor, start_date, end_date, factor_col='str_factor', bi
     wide_can_buy = wide_can_buy.loc[common_dates]
     wide_can_sell = wide_can_sell.loc[common_dates]
 
-    # shift 对齐到 T 日视角:
-    # T+1日能否买入 → shift(-1) 使其对齐到 T 日行
-    # T+1日能否卖出上期持仓 → shift(-1) 使其对齐到 T 日行
-    wide_can_buy_aligned = wide_can_buy.shift(-1)
-    wide_can_sell_aligned = wide_can_sell.shift(-1)
+    # 新视角: T日为交易日, 因子来自T-1日
+    # 因子 shift(1): T-1日因子对齐到T日行
+    # can_buy / can_sell: 直接用T日的, 不需要shift
+    wide_factor = wide_factor.shift(1)
 
     # --- 2. 预处理 ---
     log("======= 因子预处理 =======")
@@ -383,7 +389,8 @@ def run_factor_test(df_factor, start_date, end_date, factor_col='str_factor', bi
 
     # --- 3. 计算收益率 ---
     log("======= 收益率计算 =======")
-    wide_ret = get_future_returns(wide_close)
+    wide_ret = get_future_returns(wide_close, N=N)        # N天总收益, 用于IC
+    wide_ret_daily = get_future_returns(wide_close, N=1)  # 日频收益, 用于分层模拟
 
     # --- 4. 评价 ---
     log("======= IC分析 =======")
@@ -391,7 +398,7 @@ def run_factor_test(df_factor, start_date, end_date, factor_col='str_factor', bi
 
     log("======= 分层汇总(含交易约束) =======")
     quantile_df = calc_quantile_stats(
-        processed_factor, wide_ret, wide_can_buy_aligned, wide_can_sell_aligned, bins=bins
+        processed_factor, wide_ret_daily, wide_can_buy, wide_can_sell, bins=bins, N=N
     )
     
     # --- 5. 可视化 ---
@@ -425,6 +432,7 @@ def run_factor_test(df_factor, start_date, end_date, factor_col='str_factor', bi
     return results
 
 if __name__ == '__main__':
+    period = 5
     df_factor = pd.read_parquet(r'G:\quant_road\str.parquet')
-    run_factor_test(df_factor, '2016-01-01', '2025-12-31', bins=10)
+    run_factor_test(df_factor, '2016-01-01', '2025-12-31', bins=10, N=period)
     print(1)
