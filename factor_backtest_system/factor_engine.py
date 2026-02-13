@@ -59,7 +59,7 @@ def plot_factor_coverage(df_factor, df_daily):
     plt.tight_layout()
     plt.show()
 
-def plot_ic_cumulative(ic_df):
+def plot_ic_cumulative(ic_df, factor_col='Factor'):
     """
     图3：累积 IC / Rank IC 时序图
     上图: IC 柱状图 + 累积IC曲线
@@ -83,7 +83,7 @@ def plot_ic_cumulative(ic_df):
     ax0_twin.legend(loc='upper left')
 
     axes[0].set_ylabel('IC')
-    axes[0].set_title(
+    axes[0].set_title(f'{factor_col} | '
         f'IC Series  |  Mean={ic_mean:.4f}  Std={ic_std:.4f}  '
         f'IR={ic_ir:.4f}  IC>0: {ic_pos_ratio:.1%}'
     )
@@ -106,7 +106,7 @@ def plot_ic_cumulative(ic_df):
     ax1_twin.legend(loc='upper left')
 
     axes[1].set_ylabel('Rank IC')
-    axes[1].set_title(
+    axes[1].set_title(f'{factor_col} | '
         f'Rank IC Series  |  Mean={ric_mean:.4f}  Std={ric_std:.4f}  '
         f'IR={ric_ir:.4f}  RankIC>0: {ric_pos_ratio:.1%}'
     )
@@ -116,7 +116,7 @@ def plot_ic_cumulative(ic_df):
     plt.tight_layout()
     plt.show()
 
-def plot_ic_yearly(ic_df):
+def plot_ic_yearly(ic_df, factor_col='Factor'):
     """
     图3b：分年度 IC / Rank IC 统计柱状图
     每年一组柱子, 展示该年 IC均值、Rank IC均值、IC_IR
@@ -150,7 +150,7 @@ def plot_ic_yearly(ic_df):
                      ha='center', va='bottom' if h >= 0 else 'top', fontsize=8)
     axes[0].set_xticks(x)
     axes[0].set_xticklabels(yearly.index)
-    axes[0].set_title('Yearly IC Mean & Rank IC Mean')
+    axes[0].set_title(f'{factor_col} Yearly IC Mean & Rank IC Mean')
     axes[0].axhline(y=0, color='black', linewidth=0.5)
     axes[0].legend(loc='upper left')
     axes[0].grid(True, linestyle='--', alpha=0.3, axis='y')
@@ -168,7 +168,7 @@ def plot_ic_yearly(ic_df):
                      ha='center', va='bottom' if h >= 0 else 'top', fontsize=8)
     axes[1].set_xticks(x)
     axes[1].set_xticklabels(yearly.index)
-    axes[1].set_title('Yearly IC IR & Rank IC IR')
+    axes[1].set_title(f'{factor_col} Yearly IC IR & Rank IC IR')
     axes[1].axhline(y=0, color='black', linewidth=0.5)
     axes[1].legend(loc='upper left')
     axes[1].grid(True, linestyle='--', alpha=0.3, axis='y')
@@ -176,7 +176,7 @@ def plot_ic_yearly(ic_df):
     plt.tight_layout()
     plt.show()
 
-def plot_quantile_returns(quantile_df, bins=5):
+def plot_quantile_returns(quantile_df, bins=5, factor_col='Factor'):
     """
     图4：分层收益图
     子图1: 各组平均日收益柱状图
@@ -193,7 +193,7 @@ def plot_quantile_returns(quantile_df, bins=5):
     for i, (name, val) in enumerate(mean_rets.items()):
         axes[0].text(i, val, f'{val*100:.4f}%', ha='center',
                      va='bottom' if val >= 0 else 'top', fontsize=9)
-    axes[0].set_title('Average Daily Return by Quantile Group')
+    axes[0].set_title(f'{factor_col} Average Daily Return by Quantile Group')
     axes[0].set_ylabel('Mean Daily Return')
     axes[0].axhline(y=0, color='black', linewidth=0.5)
     axes[0].grid(True, linestyle='--', alpha=0.3, axis='y')
@@ -203,7 +203,7 @@ def plot_quantile_returns(quantile_df, bins=5):
         cum_ret = (1 + quantile_df[col]).cumprod()
         axes[1].plot(cum_ret.index, cum_ret, label=col, color=colors[i], linewidth=1.2)
 
-    axes[1].set_title('Quantile Cumulative Net Value')
+    axes[1].set_title(f'{factor_col} Quantile Cumulative Net Value')
     axes[1].set_ylabel('Net Value')
     axes[1].legend(loc='upper left', ncol=bins)
     axes[1].axhline(y=1, color='black', linewidth=0.5)
@@ -218,7 +218,7 @@ def _calc_drawdown(nav):
     drawdown = (nav - running_max) / running_max
     return drawdown
 
-def plot_long_short(quantile_df, bins=5):
+def plot_long_short(quantile_df, bins=5, factor_col='Factor'):
     """
     图5：多头/多空净值与回撤
     子图1: 多头(Group_bins)净值曲线 + 回撤面积图
@@ -240,7 +240,7 @@ def plot_long_short(quantile_df, bins=5):
     ax0_twin.set_ylim(long_dd.min() * 1.5, 0)
 
     axes[0].set_ylabel('Net Value')
-    axes[0].set_title(
+    axes[0].set_title(f'{factor_col}'
         f'Long (Group_{bins})  |  '
         f'Annualized≈{long_ann:.2%}  MaxDD={long_max_dd:.2%}'
     )
@@ -263,7 +263,7 @@ def plot_long_short(quantile_df, bins=5):
     ax1_twin.set_ylim(ls_dd.min() * 1.5, 0)
 
     axes[1].set_ylabel('Net Value')
-    axes[1].set_title(
+    axes[1].set_title(f'{factor_col} | '
         f'Long-Short (Group_{bins} - Group_1)  |  '
         f'Annualized≈{ls_ann:.2%}  MaxDD={ls_max_dd:.2%}'
     )

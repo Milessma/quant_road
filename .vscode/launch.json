@@ -11,9 +11,8 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "env": {
-                // 把项目根目录加入Python的运行时搜索路径
-                "PYTHONPATH": "G:\\quant_road"
-            },
+                "PYTHONPATH": "G:\\quant_road;G:\\quant_road\\factor_backtest_system"
+            }
         }
     ]
 }

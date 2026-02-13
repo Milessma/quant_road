@@ -134,13 +134,13 @@ def run_factor_test(df_factor, start_date, end_date, factor_col='str_factor', bi
     
     # --- 5. 可视化 ---
     log("======= 绘制IC累积图 =======")
-    plot_ic_cumulative(ic_df)
+    plot_ic_cumulative(ic_df, factor_col=factor_col)
     log("======= 绘制分年度IC =======")
-    plot_ic_yearly(ic_df)
+    plot_ic_yearly(ic_df, factor_col=factor_col)
     log("======= 绘制分层收益图 =======")
-    plot_quantile_returns(quantile_df, bins=bins)
+    plot_quantile_returns(quantile_df, bins=bins, factor_col=factor_col)
     log("======= 绘制多头/多空净值与回撤 =======")
-    plot_long_short(quantile_df, bins=bins)
+    plot_long_short(quantile_df, bins=bins, factor_col=factor_col)
 
     # --- 6. 汇总结果 ---
     results = {
