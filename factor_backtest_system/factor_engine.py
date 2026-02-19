@@ -188,7 +188,8 @@ def plot_quantile_returns(quantile_df, bins=5, factor_col='Factor'):
     colors = plt.cm.RdYlGn_r(np.linspace(0.1, 0.9, bins))
 
     # --- 子图1: 各组平均日收益柱状图 ---
-    mean_rets = quantile_df.mean()
+    daily_rets = quantile_df.pct_change() # 净值变化率 = 日收益率
+    mean_rets = daily_rets.mean()
     axes[0].bar(mean_rets.index, mean_rets.values, color=colors, edgecolor='grey', linewidth=0.5)
     for i, (name, val) in enumerate(mean_rets.items()):
         axes[0].text(i, val, f'{val*100:.4f}%', ha='center',
@@ -200,8 +201,7 @@ def plot_quantile_returns(quantile_df, bins=5, factor_col='Factor'):
 
     # --- 子图2: 各组累积净值曲线 ---
     for i, col in enumerate(quantile_df.columns):
-        cum_ret = (1 + quantile_df[col]).cumprod()
-        axes[1].plot(cum_ret.index, cum_ret, label=col, color=colors[i], linewidth=1.2)
+        axes[1].plot(quantile_df.index, quantile_df[col], label=col, color=colors[i], linewidth=1.2)
 
     axes[1].set_title(f'{factor_col} Quantile Cumulative Net Value')
     axes[1].set_ylabel('Net Value')
@@ -218,19 +218,22 @@ def _calc_drawdown(nav):
     drawdown = (nav - running_max) / running_max
     return drawdown
 
+def annualized_return(nav, trading_days_per_year=242):
+    """计算复利年化收益率"""
+    years = len(nav) / trading_days_per_year
+    total_return = nav.iloc[-1] / nav.iloc[0] - 1
+    return (1 + total_return) ** (1 / years) - 1
+
 def plot_long_short(quantile_df, bins=5, factor_col='Factor'):
     """
     图5：多头/多空净值与回撤
-    子图1: 多头(Group_bins)净值曲线 + 回撤面积图
-    子图2: 多空(Group_bins - Group_1)净值曲线 + 回撤面积图
     """
     fig, axes = plt.subplots(2, 1, figsize=(14, 10), sharex=True)
 
     # ========== 子图1: 多头 ==========
-    long_ret = quantile_df[f'Group_{bins}']
-    long_nav = (1 + long_ret).cumprod()
+    long_nav = quantile_df[f'Group_{bins}']
     long_dd = _calc_drawdown(long_nav)
-    long_ann = long_ret.mean() * 242
+    long_ann = annualized_return(long_nav)
     long_max_dd = long_dd.min()
 
     axes[0].plot(long_nav.index, long_nav, color='#e74c3c', linewidth=1.2, label='Long NAV')
@@ -240,7 +243,7 @@ def plot_long_short(quantile_df, bins=5, factor_col='Factor'):
     ax0_twin.set_ylim(long_dd.min() * 1.5, 0)
 
     axes[0].set_ylabel('Net Value')
-    axes[0].set_title(f'{factor_col}'
+    axes[0].set_title(f'{factor_col} | '
         f'Long (Group_{bins})  |  '
         f'Annualized≈{long_ann:.2%}  MaxDD={long_max_dd:.2%}'
     )
@@ -250,10 +253,12 @@ def plot_long_short(quantile_df, bins=5, factor_col='Factor'):
     axes[0].grid(True, linestyle='--', alpha=0.3)
 
     # ========== 子图2: 多空 ==========
-    ls_ret = quantile_df[f'Group_{bins}'] - quantile_df['Group_1']
+    long_ret = quantile_df[f'Group_{bins}'].pct_change()
+    short_ret = quantile_df['Group_1'].pct_change()
+    ls_ret = long_ret - short_ret
     ls_nav = (1 + ls_ret).cumprod()
     ls_dd = _calc_drawdown(ls_nav)
-    ls_ann = ls_ret.mean() * 242
+    ls_ann = annualized_return(ls_nav)
     ls_max_dd = ls_dd.min()
 
     axes[1].plot(ls_nav.index, ls_nav, color='#2c3e50', linewidth=1.2, label='L/S NAV')
@@ -274,6 +279,7 @@ def plot_long_short(quantile_df, bins=5, factor_col='Factor'):
 
     plt.tight_layout()
     plt.show()
+
 
 def get_future_returns(df_close_wide, N):
     """

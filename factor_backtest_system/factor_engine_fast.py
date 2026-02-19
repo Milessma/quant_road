@@ -24,7 +24,7 @@ from factor_engine import (
 )
 
 
-def calc_quantile_stats_fast(wide_factor, wide_ret_daily, wide_can_buy, wide_can_sell, bins=5, hold_days=1):
+def calc_quantile_stats_fast(wide_factor, wide_close, wide_can_buy, wide_can_sell, bins=5, hold_days=1):
     """
     分层收益计算 (向量化加速版)
     
@@ -45,10 +45,10 @@ def calc_quantile_stats_fast(wide_factor, wide_ret_daily, wide_can_buy, wide_can
     
     # 2. 转 numpy (T x N)
     q_arr = wide_quantiles.values                    # float, NaN = 无分组
-    ret_arr = wide_ret_daily.values                  # float, 日频收益
+    close_arr = wide_close.values                    # (T, N) 收盘价矩阵
     can_sell_arr = wide_can_sell.fillna(True).values.astype(bool)  # NaN 视为可卖
     
-    T, N = q_arr.shape
+    T, N = q_arr.shape # q_arr index 是日期 columns 是股票 values 是组别
     
     # 3. 预计算每组的 target mask: (bins, T, N) bool
     #    target_masks[b-1, t, :] = (q_arr[t, :] == b)
@@ -61,29 +61,38 @@ def calc_quantile_stats_fast(wide_factor, wide_ret_daily, wide_can_buy, wide_can
     prev_hold = np.zeros((bins, N), dtype=bool)
     # group_rets: (T, bins)
     group_rets = np.zeros((T, bins), dtype=np.float64)
-    
+    # price_base[b, i] = 调仓日时股票 i 的收盘价 (用于计算累计收益)
+    price_base = np.full((bins, N), np.nan, dtype=np.float64)
+    # 净值
+    base_nav = np.ones(bins) # 调仓日开始时的基准净值
+
     for t in tqdm.tqdm(range(T), desc='分层持仓模拟(fast)'):
         sell_ok = can_sell_arr[t]          # (N,) 今天能否卖出
-        
-        # 判断是否为调仓日: 从 t=1 开始, 每 hold_days 天调一次仓
+        # 判断是否为调仓日: 从 t=1 开始, 每 hold_days 天调一次仓 因为T日要依据T-1日的因子
         is_rebalance = (t >= 1) and ((t - 1) % hold_days == 0)
-        
         for b in range(bins):
             if is_rebalance:
+                if t > 0:
+                    base_nav[b] = group_rets[t-1, b]
                 target = target_masks[b, t]    # (N,) 调仓日: 用新因子分组
             else:
                 target = prev_hold[b]          # (N,) 非调仓日: 沿用上期持仓
             
-            forced = prev_hold[b] & ~sell_ok  # (N,) 上期卖不出的
-            actual = target | forced       # (N,) 实际持仓
-            
-            # 计算等权收益 (日频)
-            r = ret_arr[t]                 # (N,)
-            mask = actual & np.isfinite(r) # 有持仓且有收益
-            cnt = mask.sum()
-            group_rets[t, b] = r[mask].sum() / cnt if cnt > 0 else 0.0
+            forced = prev_hold[b] & ~sell_ok  # (N,) 上期持有 且 今天卖不出
+            actual = target | forced       # (N,) 实际持仓 = 目标持仓 + 强制持仓
+
+            if is_rebalance:
+                # 记录调仓日的买入价格
+                # np.where(条件, if True取这个值, if False取这个值)
+                price_base[b] = np.where(actual, close_arr[t], np.nan) # 如果一只股票在上期被强制持有 (forced) 不在新的 target 里，但它的 price_base 应该保留之前的值 而不是被清空 但是由于此时这个股票 权重不一 不该等权 
+
+            cum_ret = (close_arr[t] - price_base[b]) / price_base[b] # (N, ) 累计收益率
+            mask = actual & np.isfinite(cum_ret) # 创建 bool 数组，筛选出没问题的股票
+            cnt = mask.sum() # 一共有多少只股票
+            period_ret = cum_ret[mask].sum() / cnt if cnt > 0 else 0.0
+            # t = 0 时 group_rets[0, b] = 1
+            group_rets[t, b] = base_nav[b] * (1 + period_ret)
             prev_hold[b] = actual
-    
     cols = [f'Group_{b}' for b in range(1, bins + 1)]
     return pd.DataFrame(group_rets, index=wide_factor.index, columns=cols)
 
@@ -121,7 +130,6 @@ def run_factor_test(df_factor, start_date, end_date, factor_col='str_factor', bi
     # --- 3. 计算收益率 ---
     log("======= 收益率计算 =======")
     wide_ret = get_future_returns(wide_close, N=N)        # N天总收益, 用于IC
-    wide_ret_daily = get_future_returns(wide_close, N=1)  # 日频收益, 用于分层模拟
 
     # --- 4. 评价 ---
     log("======= IC分析 =======")
@@ -129,7 +137,7 @@ def run_factor_test(df_factor, start_date, end_date, factor_col='str_factor', bi
 
     log("======= 分层汇总(含交易约束, 加速版) =======")
     quantile_df = calc_quantile_stats_fast(
-        processed_factor, wide_ret_daily, wide_can_buy, wide_can_sell, bins=bins, hold_days=N
+        processed_factor, wide_close, wide_can_buy, wide_can_sell, bins=bins, hold_days=N
     )
     
     # --- 5. 可视化 ---
